@@ -1,0 +1,39 @@
+From 23490cbf50a9ad62d480a0916c6d0ca61d221afb Mon Sep 17 00:00:00 2001
+From: Hangbin Liu <haliu@redhat.com>
+Date: Mon, 2 Sep 2019 19:39:36 +0800
+Subject: [PATCH 04/04] libndp: fix nd_msg typo when setting target address
+
+When setting the target address of nd_msg, I set the ns/na type reversed.
+
+Fixes: acccd780df517 ("ndptool: add -T target support")
+Signed-off-by: Hangbin Liu <haliu@redhat.com>
+Signed-off-by: Jiri Pirko <jiri@mellanox.com>
+---
+ libndp/libndp.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/libndp/libndp.c b/libndp/libndp.c
+index f327d45..8b7de6b 100644
+--- a/libndp/libndp.c
++++ b/libndp/libndp.c
+@@ -713,7 +713,7 @@ void ndp_msg_target_set(struct ndp_msg *msg, struct in6_addr *target)
+ 	enum ndp_msg_type msg_type = ndp_msg_type(msg);
+ 	switch (msg_type) {
+ 		case NDP_MSG_NS:
+-			((struct ndp_msgna*)&msg->nd_msg)->na->nd_na_target = *target;
++			((struct ndp_msgns*)&msg->nd_msg)->ns->nd_ns_target = *target;
+ 			/*
+ 			 * Neighbor Solicitations are multicast when the node
+ 			 * needs to resolve an address and unicast when the
+@@ -727,7 +727,7 @@ void ndp_msg_target_set(struct ndp_msg *msg, struct in6_addr *target)
+ 			ndp_msg_addrto_adjust_solicit_multi(&msg->addrto, target);
+ 			break;
+ 		case NDP_MSG_NA:
+-			((struct ndp_msgns*)&msg->nd_msg)->ns->nd_ns_target = *target;
++			((struct ndp_msgna*)&msg->nd_msg)->na->nd_na_target = *target;
+ 			break;
+ 		default:
+ 			break;
+-- 
+2.19.2
+

@@ -1,0 +1,152 @@
+From 682b0ccabdc7970f89544c0d19477515583a5f5b Mon Sep 17 00:00:00 2001
+From: Beniamino Galvani <bgalvani@redhat.com>
+Date: Thu, 25 Feb 2021 14:38:16 +0100
+Subject: [PATCH] libndp,ndptool: use poll() instead of select()
+
+select() doesn't support file descriptors greater than 1023. If the
+program has many files open, the socket descriptor can be > 1023 and
+then FD_SET(fd, &rfds) causes a buffer overflow.
+
+Switch to poll() and ppoll() which don't have this limitation.
+
+Signed-off-by: Beniamino Galvani <bgalvani@redhat.com>
+Signed-off-by: Jiri Pirko <jiri@nvidia.com>
+---
+ libndp/libndp.c   | 20 +++++++++-----------
+ utils/Makefile.am |  2 +-
+ utils/Makefile.in |  2 +-
+ utils/ndptool.c   | 22 +++++++++-------------
+ 4 files changed, 20 insertions(+), 26 deletions(-)
+
+diff --git a/libndp/libndp.c b/libndp/libndp.c
+index 06a3d23..6314717 100644
+--- a/libndp/libndp.c
++++ b/libndp/libndp.c
+@@ -25,7 +25,7 @@
+ #include <errno.h>
+ #include <ctype.h>
+ #include <sys/socket.h>
+-#include <sys/select.h>
++#include <poll.h>
+ #include <netinet/in.h>
+ #include <netinet/icmp6.h>
+ #include <arpa/inet.h>
+@@ -2107,22 +2107,20 @@ int ndp_call_eventfd_handler(struct ndp *ndp)
+ NDP_EXPORT
+ int ndp_callall_eventfd_handler(struct ndp *ndp)
+ {
+-	fd_set rfds;
+-	int fdmax;
+-	struct timeval tv;
+-	int fd = ndp_get_eventfd(ndp);
++	struct pollfd pfd;
+ 	int ret;
+ 	int err;
+ 
+-	memset(&tv, 0, sizeof(tv));
+-	FD_ZERO(&rfds);
+-	FD_SET(fd, &rfds);
+-	fdmax = fd + 1;
++	pfd = (struct pollfd) {
++		.fd = ndp_get_eventfd(ndp),
++		.events = POLLIN,
++	};
++
+ 	while (true) {
+-		ret = select(fdmax, &rfds, NULL, NULL, &tv);
++		ret = poll(&pfd, 1, 0);
+ 		if (ret == -1)
+ 			return -errno;
+-		if (!FD_ISSET(fd, &rfds))
++		if (!(pfd.revents & POLLIN))
+ 			return 0;
+ 		err = ndp_call_eventfd_handler(ndp);
+ 		if (err)
+diff --git a/utils/Makefile.am b/utils/Makefile.am
+index cca00c2..75e452c 100644
+--- a/utils/Makefile.am
++++ b/utils/Makefile.am
+@@ -2,7 +2,7 @@ MAINTAINERCLEANFILES = Makefile.in
+ 
+ ACLOCAL_AMFLAGS = -I m4
+ 
+-AM_CFLAGS = -I${top_srcdir}/include
++AM_CFLAGS = -I${top_srcdir}/include -D_GNU_SOURCE
+ 
+ ndptool_LDADD = $(top_builddir)/libndp/libndp.la
+ 
+diff --git a/utils/Makefile.in b/utils/Makefile.in
+index e339b19..d81de50 100644
+--- a/utils/Makefile.in
++++ b/utils/Makefile.in
+@@ -294,7 +294,7 @@ top_builddir = @top_builddir@
+ top_srcdir = @top_srcdir@
+ MAINTAINERCLEANFILES = Makefile.in
+ ACLOCAL_AMFLAGS = -I m4
+-AM_CFLAGS = -I${top_srcdir}/include
++AM_CFLAGS = -I${top_srcdir}/include -D_GNU_SOURCE
+ ndptool_LDADD = $(top_builddir)/libndp/libndp.la
+ ndptool_SOURCES = ndptool.c
+ all: all-am
+diff --git a/utils/ndptool.c b/utils/ndptool.c
+index 662ff01..618f167 100644
+--- a/utils/ndptool.c
++++ b/utils/ndptool.c
+@@ -28,7 +28,7 @@
+ #include <arpa/inet.h>
+ #include <errno.h>
+ #include <ndp.h>
+-#include <sys/select.h>
++#include <poll.h>
+ 
+ enum verbosity_level {
+ 	VERB1,
+@@ -59,13 +59,10 @@ static void empty_signal_handler(int signal)
+ 
+ static int run_main_loop(struct ndp *ndp)
+ {
+-	fd_set rfds;
+-	fd_set rfds_tmp;
+-	int fdmax;
++	struct pollfd pfd;
+ 	int ret;
+ 	struct sigaction siginfo;
+ 	sigset_t mask;
+-	int ndp_fd;
+ 	int err = 0;
+ 
+ 	sigemptyset(&siginfo.sa_mask);
+@@ -100,23 +97,22 @@ static int run_main_loop(struct ndp *ndp)
+ 
+ 	sigemptyset(&mask);
+ 
+-	FD_ZERO(&rfds);
+-	ndp_fd = ndp_get_eventfd(ndp);
+-	FD_SET(ndp_fd, &rfds);
+-	fdmax = ndp_fd + 1;
++	pfd = (struct pollfd) {
++		.fd = ndp_get_eventfd(ndp),
++		.events = POLLIN,
++	};
+ 
+ 	for (;;) {
+-		rfds_tmp = rfds;
+-		ret = pselect(fdmax, &rfds_tmp, NULL, NULL, NULL, &mask);
++		ret = ppoll(&pfd, 1, NULL, &mask);
+ 		if (ret == -1) {
+ 			if (errno == EINTR) {
+ 				goto out;
+ 			}
+-			pr_err("Select failed\n");
++			pr_err("Poll failed\n");
+ 			err = -errno;
+ 			goto out;
+ 		}
+-		if (FD_ISSET(ndp_fd, &rfds_tmp)) {
++		if (pfd.revents & POLLIN) {
+ 			err = ndp_call_eventfd_handler(ndp);
+ 			if (err) {
+ 				pr_err("ndp eventfd handler call failed\n");
+-- 
+2.26.2
+

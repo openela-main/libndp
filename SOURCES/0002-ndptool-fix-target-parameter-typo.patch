@@ -1,0 +1,31 @@
+From e67999b18c59d37d59b557316dfe53ed5d52e923 Mon Sep 17 00:00:00 2001
+From: Hangbin Liu <haliu@redhat.com>
+Date: Wed, 12 Dec 2018 11:38:30 +0800
+Subject: [PATCH 02/04] ndptool: fix target parameter typo
+
+In my last commit acccd780df517 ("ndptool: add -T target support"), after
+renaming parameter -d to -T. I forgot to change the name in switch opt.
+
+Fixes: acccd780df517 ("ndptool: add -T target support")
+Signed-off-by: Hangbin Liu <haliu@redhat.com>
+Signed-off-by: Jiri Pirko <jiri@mellanox.com>
+---
+ utils/ndptool.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/utils/ndptool.c b/utils/ndptool.c
+index ba24d75..afa516f 100644
+--- a/utils/ndptool.c
++++ b/utils/ndptool.c
+@@ -421,7 +421,7 @@ int main(int argc, char **argv)
+ 			free(ifname);
+ 			ifname = strdup(optarg);
+ 			break;
+-		case 'd':
++		case 'T':
+ 			free(addr);
+ 			addr = strdup(optarg);
+ 			break;
+-- 
+2.19.2
+

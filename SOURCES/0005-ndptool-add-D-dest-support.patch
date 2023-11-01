@@ -1,0 +1,248 @@
+From e9a35fba03ec3670586fba7debd2e0cb3cd4341e Mon Sep 17 00:00:00 2001
+From: Hangbin Liu <haliu@redhat.com>
+Date: Mon, 2 Sep 2019 19:39:12 +0800
+Subject: [PATCH 05/06] ndptool: add -D dest support
+
+This patch add -D dest option, with this option a user could set the dest
+address in IPv6 header for solicited NS/NA message
+
+For function ndp_msg_addrto_adjust_solicit_multi(), I moved the check
+in ndp_msg_target_set() instead of in the function itself.
+
+I also use reverse christmas tree variable order in the main() function
+of ndptool.c.
+
+Signed-off-by: Hangbin Liu <haliu@redhat.com>
+Signed-off-by: Jiri Pirko <jiri@mellanox.com>
+---
+ include/ndp.h   |  1 +
+ libndp/libndp.c | 42 ++++++++++++++++++++++++++++++++----------
+ man/ndptool.8   |  6 +++++-
+ utils/ndptool.c | 49 +++++++++++++++++++++++++++++++++++--------------
+ 4 files changed, 73 insertions(+), 25 deletions(-)
+
+diff --git a/include/ndp.h b/include/ndp.h
+index 698bba7..7bf8794 100644
+--- a/include/ndp.h
++++ b/include/ndp.h
+@@ -80,6 +80,7 @@ struct in6_addr *ndp_msg_addrto(struct ndp_msg *msg);
+ uint32_t ndp_msg_ifindex(struct ndp_msg *msg);
+ void ndp_msg_ifindex_set(struct ndp_msg *msg, uint32_t ifindex);
+ void ndp_msg_target_set(struct ndp_msg *msg, struct in6_addr *target);
++void ndp_msg_dest_set(struct ndp_msg *msg, struct in6_addr *dest);
+ void ndp_msg_opt_set(struct ndp_msg *msg);
+ int ndp_msg_send(struct ndp *ndp, struct ndp_msg *msg);
+ int ndp_msg_send_with_flags(struct ndp *ndp, struct ndp_msg *msg, uint8_t flags);
+diff --git a/libndp/libndp.c b/libndp/libndp.c
+index 8b7de6b..283de77 100644
+--- a/libndp/libndp.c
++++ b/libndp/libndp.c
+@@ -318,11 +318,6 @@ static void ndp_msg_addrto_adjust_all_routers(struct in6_addr *addr)
+ static void ndp_msg_addrto_adjust_solicit_multi(struct in6_addr *addr,
+ 						struct in6_addr *target)
+ {
+-	struct in6_addr any = IN6ADDR_ANY_INIT;
+-
+-	/* Don't set addr to target if target is default IN6ADDR_ANY_INIT */
+-	if (!memcmp(target, &any, sizeof(any)))
+-		return;
+ 	addr->s6_addr32[0] = htonl(0xFF020000);
+ 	addr->s6_addr32[1] = 0;
+ 	addr->s6_addr32[2] = htonl(0x1);
+@@ -700,17 +695,41 @@ void ndp_msg_ifindex_set(struct ndp_msg *msg, uint32_t ifindex)
+ 	msg->ifindex = ifindex;
+ }
+ 
++/**
++ * ndp_msg_dest_set:
++ * @msg: message structure
++ * @dest: ns,na dest
++ *
++ * Set dest address in IPv6 header for NS and NA.
++ **/
++NDP_EXPORT
++void ndp_msg_dest_set(struct ndp_msg *msg, struct in6_addr *dest)
++{
++	enum ndp_msg_type msg_type = ndp_msg_type(msg);
++	switch (msg_type) {
++		case NDP_MSG_NS:
++			/* fall through */
++		case NDP_MSG_NA:
++			msg->addrto = *dest;
++			/* fall through */
++		default:
++			break;
++	}
++}
++
+ /**
+  * ndp_msg_target_set:
+  * @msg: message structure
+  * @target: ns,na target
+  *
+- * Set target address for NS and NA.
++ * Set target address in ICMPv6 header for NS and NA.
+  **/
+ NDP_EXPORT
+ void ndp_msg_target_set(struct ndp_msg *msg, struct in6_addr *target)
+ {
++	struct in6_addr any = IN6ADDR_ANY_INIT;
+ 	enum ndp_msg_type msg_type = ndp_msg_type(msg);
++
+ 	switch (msg_type) {
+ 		case NDP_MSG_NS:
+ 			((struct ndp_msgns*)&msg->nd_msg)->ns->nd_ns_target = *target;
+@@ -720,11 +739,14 @@ void ndp_msg_target_set(struct ndp_msg *msg, struct in6_addr *target)
+ 			 * node seeks to verify the reachability of a
+ 			 * neighbor.
+ 			 *
+-			 * In this case we don't know if we have a cache of
+-			 * target, so we use multicast to resolve the target
+-			 * address.
++			 * In this case we need to update the dest address in
++			 * IPv6 header when
++			 * a) IPv6 dest address is not set
++			 * b) ICMPv6 target address is supplied
+ 			 * */
+-			ndp_msg_addrto_adjust_solicit_multi(&msg->addrto, target);
++			if (!memcmp(&msg->addrto, &any, sizeof(any)) &&
++			    memcmp(target, &any, sizeof(any)))
++				ndp_msg_addrto_adjust_solicit_multi(&msg->addrto, target);
+ 			break;
+ 		case NDP_MSG_NA:
+ 			((struct ndp_msgna*)&msg->nd_msg)->na->nd_na_target = *target;
+diff --git a/man/ndptool.8 b/man/ndptool.8
+index dd6ddee..fb0dd63 100644
+--- a/man/ndptool.8
++++ b/man/ndptool.8
+@@ -41,9 +41,13 @@ Neighbor Advertisement.
+ .B "\-i ifname, \-\-ifname ifname"
+ Specified interface name.
+ 
++.TP
++.B "\-D dest, \-\-dest dest"
++Specified dest address in IPv6 header for NS/NA message.
++
+ .TP
+ .B "\-T target, \-\-target target"
+-Specified target address for NS/NA message.
++Specified target address in ICMPv6 header for NS/NA message.
+ 
+ .TP
+ .B "\-U, \-\-unsolicited"
+diff --git a/utils/ndptool.c b/utils/ndptool.c
+index afa516f..1131462 100644
+--- a/utils/ndptool.c
++++ b/utils/ndptool.c
+@@ -135,7 +135,8 @@ static void print_help(const char *argv0) {
+             "\t-v --verbose             Increase output verbosity\n"
+             "\t-t --msg-type=TYPE       Specify message type\n"
+ 	    "\t                         (\"rs\", \"ra\", \"ns\", \"na\")\n"
+-            "\t-T --target=TARGET       Target address for NS or NA\n"
++            "\t-D --dest=DEST           Dest address in IPv6 header for NS or NA\n"
++            "\t-T --target=TARGET       Target address in ICMPv6 header for NS or NA\n"
+             "\t-i --ifname=IFNAME       Specify interface name\n"
+             "\t-U --unsolicited         Send Unsolicited NA\n"
+ 	    "Available commands:\n"
+@@ -334,7 +335,8 @@ static int run_cmd_monitor(struct ndp *ndp, enum ndp_msg_type msg_type,
+ }
+ 
+ static int run_cmd_send(struct ndp *ndp, enum ndp_msg_type msg_type,
+-			uint32_t ifindex, struct in6_addr *target)
++			uint32_t ifindex, struct in6_addr *dest,
++			struct in6_addr *target)
+ {
+ 	struct ndp_msg *msg;
+ 	int err;
+@@ -345,6 +347,7 @@ static int run_cmd_send(struct ndp *ndp, enum ndp_msg_type msg_type,
+ 		return err;
+ 	}
+ 	ndp_msg_ifindex_set(msg, ifindex);
++	ndp_msg_dest_set(msg, dest);
+ 	ndp_msg_target_set(msg, target);
+ 	ndp_msg_opt_set(msg);
+ 
+@@ -387,23 +390,27 @@ int main(int argc, char **argv)
+ 		{ "verbose",	no_argument,		NULL, 'v' },
+ 		{ "msg-type",	required_argument,	NULL, 't' },
+ 		{ "ifname",	required_argument,	NULL, 'i' },
++		{ "dest",	required_argument,	NULL, 'D' },
+ 		{ "target",	required_argument,	NULL, 'T' },
+ 		{ "unsolicited",no_argument,		NULL, 'U' },
+ 		{ NULL, 0, NULL, 0 }
+ 	};
+-	int opt;
+-	struct ndp *ndp;
+-	char *msgtypestr = NULL;
++
++	struct in6_addr target = IN6ADDR_ANY_INIT;
++	struct in6_addr dest = IN6ADDR_ANY_INIT;
+ 	enum ndp_msg_type msg_type;
++	char *msgtypestr = NULL;
++	int res = EXIT_FAILURE;
+ 	char *ifname = NULL;
+-	char *addr = NULL;
+-	struct in6_addr target = IN6ADDR_ANY_INIT;
++	char *daddr = NULL;
++	char *taddr = NULL;
+ 	uint32_t ifindex;
++	struct ndp *ndp;
+ 	char *cmd_name;
++	int opt;
+ 	int err;
+-	int res = EXIT_FAILURE;
+ 
+-	while ((opt = getopt_long(argc, argv, "hvt:T:i:U",
++	while ((opt = getopt_long(argc, argv, "hvt:D:T:i:U",
+ 				  long_options, NULL)) >= 0) {
+ 
+ 		switch(opt) {
+@@ -421,9 +428,13 @@ int main(int argc, char **argv)
+ 			free(ifname);
+ 			ifname = strdup(optarg);
+ 			break;
++		case 'D':
++			free(daddr);
++			daddr = strdup(optarg);
++			break;
+ 		case 'T':
+-			free(addr);
+-			addr = strdup(optarg);
++			free(taddr);
++			taddr = strdup(optarg);
+ 			break;
+ 		case 'U':
+ 			flags |= ND_OPT_NA_UNSOL;
+@@ -458,8 +469,18 @@ int main(int argc, char **argv)
+ 		}
+ 	}
+ 
+-	if (addr && inet_pton(AF_INET6, addr, &target) <= 0) {
+-		pr_err("Invalid target address \"%s\"\n", addr);
++	if (daddr && (flags & ND_OPT_NA_UNSOL)) {
++		pr_err("Conflicts for both setting dest address and unsolicited flag\n");
++		goto errout;
++	}
++
++	if (daddr && inet_pton(AF_INET6, daddr, &dest) <= 0) {
++		pr_err("Invalid dest address \"%s\"\n", daddr);
++		goto errout;
++	}
++
++	if (taddr && inet_pton(AF_INET6, taddr, &target) <= 0) {
++		pr_err("Invalid target address \"%s\"\n", taddr);
+ 		goto errout;
+ 	}
+ 
+@@ -493,7 +514,7 @@ int main(int argc, char **argv)
+ 			print_help(argv0);
+ 			goto errout;
+ 		}
+-		err = run_cmd_send(ndp, msg_type, ifindex, &target);
++		err = run_cmd_send(ndp, msg_type, ifindex, &dest, &target);
+ 	} else {
+ 		pr_err("Unknown command \"%s\"\n", cmd_name);
+ 		goto ndp_close;
+-- 
+2.19.2
+
