@@ -1,0 +1,56 @@
+From 27403f898372e99b0ad916bebe2bc29e95bee1f0 Mon Sep 17 00:00:00 2001
+From: Hangbin Liu <haliu@redhat.com>
+Date: Tue, 24 Sep 2019 14:17:56 +0800
+Subject: [PATCH 06/06] ndptool: fix potential memory leak caused by strdup
+
+We use strdup to copy the parameters. As strdup will call malloc when
+obtain the memory, we need to free them before exit, or there will be
+memory leak. This is found by covscan.
+
+Signed-off-by: Hangbin Liu <haliu@redhat.com>
+Signed-off-by: Jiri Pirko <jiri@mellanox.com>
+---
+ utils/ndptool.c | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/utils/ndptool.c b/utils/ndptool.c
+index 1131462..4eca83d 100644
+--- a/utils/ndptool.c
++++ b/utils/ndptool.c
+@@ -416,7 +416,8 @@ int main(int argc, char **argv)
+ 		switch(opt) {
+ 		case 'h':
+ 			print_help(argv0);
+-			return EXIT_SUCCESS;
++			res = EXIT_SUCCESS;
++			goto errout;
+ 		case 'v':
+ 			g_verbosity++;
+ 			break;
+@@ -442,11 +443,11 @@ int main(int argc, char **argv)
+ 		case '?':
+ 			pr_err("unknown option.\n");
+ 			print_help(argv0);
+-			return EXIT_FAILURE;
++			goto errout;
+ 		default:
+ 			pr_err("unknown option \"%c\".\n", opt);
+ 			print_help(argv0);
+-			return EXIT_FAILURE;
++			goto errout;
+ 		}
+ 	}
+ 
+@@ -530,5 +531,9 @@ int main(int argc, char **argv)
+ ndp_close:
+ 	ndp_close(ndp);
+ errout:
++	free(msgtypestr);
++	free(ifname);
++	free(daddr);
++	free(taddr);
+ 	return res;
+ }
+-- 
+2.19.2
+
