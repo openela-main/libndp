@@ -1,6 +1,6 @@
 Name: libndp
 Version: 1.7
-Release: 6%{?dist}
+Release: 7%{?dist}
 Summary: Library for Neighbor Discovery Protocol
 Group: System Environment/Libraries
 License: LGPLv2+
@@ -14,6 +14,7 @@ Patch4: 0004-libndp-fix-nd_msg-typo-when-setting-target-address.patch
 Patch5: 0005-ndptool-add-D-dest-support.patch
 Patch6: 0006-ndptool-fix-potential-memory-leak-caused-by-strdup.patch
 Patch7: 0007-libndp-ndptool-use-poll-instead-of-select.patch
+Patch8: 0008-libndp-valid-route-information-option-length.patch
 
 %description
 This package contains a library which provides a wrapper
@@ -38,6 +39,7 @@ necessary for developing programs using libndp.
 %patch5 -p1 -b .ndptool_add_D_dest_support
 %patch6 -p1 -b .ndptool_fix_potential_memory_leak
 %patch7 -p1 -b .ndptool_use_poll
+%patch8 -p1 -b .libndp_route_info_length
 
 %build
 %configure --disable-static
@@ -63,6 +65,9 @@ find $RPM_BUILD_ROOT -name \*.la -delete
 %{_libdir}/pkgconfig/*.pc
 
 %changelog
+* Wed Jul 10 2024 Felix Maurer <fmaurer@redhat.com> - 1.7-7
+- Validate route information option length
+
 * Mon Apr 26 2021 Hangbin Liu <haliu@redhat.com> - 1.7-6
 - Bump the version number due to conflict with (rhbz 1937721)
 
