@@ -1,11 +1,10 @@
 Name: libndp
-Version: 1.8
-Release: 6%{?dist}
+Version: 1.9
+Release: 1%{?dist}
 Summary: Library for Neighbor Discovery Protocol
 License: LGPL-2.1-or-later
 URL: http://www.libndp.org/
 Source: http://www.libndp.org/files/libndp-%{version}.tar.gz
-Patch0: 0000-libndp-valid-route-information-option-length.patch
 
 BuildRequires:  gcc
 BuildRequires: make
@@ -24,7 +23,6 @@ necessary for developing programs using libndp.
 
 %prep
 %setup -q
-%patch -p1 -P 0
 
 %build
 %configure --disable-static
@@ -48,8 +46,8 @@ find $RPM_BUILD_ROOT -name \*.la -delete
 %{_libdir}/pkgconfig/*.pc
 
 %changelog
-* Wed Jul 10 2024 Felix Maurer <fmaurer@redhat.com> - 1.8-6
-- Validate route information option length
+* Wed Jul 10 2024 Felix Maurer <fmaurer@redhat.com> - 1.9-1
+- Update to libndp 1.9
 
 * Wed Nov 15 2023 Hangbin Liu <haliu@redhat.com> - 1.8-5
 - Convert the license tag to SPDX format
